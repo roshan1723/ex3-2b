@@ -76,7 +76,13 @@ void traceroute(char* dest) {
      * - icmpheader* icmp = (icmpheader*)send_buf;
      * - set header fields with required values: icmp->field = value;
      * */
-    
+    icmpheader* icmp = (icmpheader*)send_buf;
+    icmp->icmp_type = ICMP_ECHO_REQUEST;
+    icmp->icmp_code = 0;
+    icmp->icmp_chksum = 0;
+    icmp->icmp_id = getpid();
+    icmp->icmp_seq = 0;
+
     for (int ttl = 1; ttl <= MAX_HOPS; ) {
         printf("%2d ", ttl);
         /** TODO: 2
@@ -85,7 +91,7 @@ void traceroute(char* dest) {
          * HINT:
          * similar to TODO 1 HINT, just set the seq
          */
-       
+        icmp->icmp_seq = ttl;
 
         // set ttl to outgoing packets: no need to change
         if (setsockopt(sockfd, IPPROTO_IP, IP_TTL, (const char*)&ttl, sizeof(ttl)) < 0) {
@@ -103,8 +109,19 @@ void traceroute(char* dest) {
              * - ensure we send one icmpheader in the packet
              * 
              */
-           
-           
+            sockaddr_in r_addr;
+            memset(&r_addr, 0, sizeof(r_addr));
+            if(sizeof(sockaddr_in) != sizeof(r_addr)){
+                printf("sizeof(sockaddr_in) != sizeof(recv_addr)\n");
+            }
+            int bytes_sent = sendto(sockfd, send_buf, sizeof(icmpheader), 0, (sockaddr*)&addr, sizeof(addr));
+            if (bytes_sent <= 0) {
+                perror("sendto failed");
+                continue;
+            }
+
+            timeval tv;
+            fd_set rfd;
             // wait to check if there is data available to receive; need to retry if timeout: no need to change
             tv.tv_sec = 1;
             tv.tv_usec = 0;
@@ -119,6 +136,14 @@ void traceroute(char* dest) {
              */
             if (ret == 0) {
                 // TODO 4.a
+                printf(" * ");
+                fflush(stdout);
+                retry++;
+                if (retry == MAX_RETRY) {
+                    printf("\n");
+                    ttl++;
+                    break;
+                }
             }
             else if (ret > 0) {
                 // TODO 4.b
@@ -126,10 +151,16 @@ void traceroute(char* dest) {
                  * a. check man page of recvfrom, function returns bytes received
                  * b. ensure data is received in recv_buf
                  */
-                
+                sockaddr_in recv_addr;
+                socklen_t r_addr_len = sizeof(recv_addr);
+                int bytes_received = recvfrom(sockfd, recv_buf, PACKET_LEN, 0, (sockaddr*)&recv_addr, &r_addr_len);
+
                 /** TODO: 5
                  * handle received packets based on received bytes
-                 * a. if (i) two pairs of ipheader and icmpheader received, (ii) type is TIME_EXCEEDED, (iii) sequence is the same as ttl, and (iv) id is same as pid
+                 * a. if (i) two pairs of ipheader and icmpheader received, 
+                 *       (ii) type is TIME_EXCEEDED, 
+                 *       (iii) sequence is the same as ttl, and 
+                 *       (iv) id is same as pid
                  *      --> print router ip and increment ttl to move on to processing next hop
                  *      NOTE: first pair contains the ipheader and icmpheader created by the router; second pair would contain the original ipheader and icmpheader sent by us
                  *  HINT:
@@ -146,6 +177,41 @@ void traceroute(char* dest) {
                  */
                
                 // ----------------
+                if(bytes_received >= 2 * (sizeof(ipheader) + sizeof(icmpheader)) ){
+                    icmpheader* router_icmp = (icmpheader*)(recv_buf + sizeof(ipheader));
+                    icmpheader* orig_icmp = (icmpheader*)( (recv_buf + sizeof(ipheader)) + sizeof(icmpheader) + sizeof(ipheader));
+                    if(router_icmp->icmp_type == ICMP_TIME_EXCEEDED 
+                    && orig_icmp->icmp_seq == ttl 
+                    && orig_icmp->icmp_id == getpid()){
+                        //5a
+                        printf("%s ", inet_ntoa(recv_addr.sin_addr));
+                        printf("\n");
+                        fflush(stdout);
+                        ttl++;
+                        break;
+                    }
+                }
+                else if (bytes_received == sizeof(ipheader) + sizeof(icmpheader)){
+                    icmpheader* received_icmp = (icmpheader*)(recv_buf + sizeof(ipheader));
+
+                    if (received_icmp->icmp_type == ICMP_ECHO_REPLY 
+                    && received_icmp->icmp_id == getpid()){
+                        //5b
+                        printf("%s ", inet_ntoa(recv_addr.sin_addr));
+                        printf("\n");
+                        exit(0);
+                    }
+                } 
+                else {
+                    printf(" * ");
+                    fflush(stdout);
+                    retry++;
+                    if (retry == MAX_RETRY) {
+                        printf("\n");
+                        ttl++;
+                        break;
+                    }
+                }
             }
             else {
                 perror("select failed");
