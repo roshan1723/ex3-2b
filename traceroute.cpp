@@ -111,15 +111,16 @@ void traceroute(char* dest) {
              */
             sockaddr_in r_addr;
             memset(&r_addr, 0, sizeof(r_addr));
-            if(sizeof(sockaddr_in) != sizeof(r_addr)){
-                printf("sizeof(sockaddr_in) != sizeof(recv_addr)\n");
-            }
+            // if(sizeof(sockaddr_in) != sizeof(r_addr)){
+            //     printf("sizeof(sockaddr_in) != sizeof(recv_addr)\n");
+            // }
             int bytes_sent = sendto(sockfd, send_buf, sizeof(icmpheader), 0, (sockaddr*)&addr, sizeof(addr));
             if (bytes_sent <= 0) {
                 perror("sendto failed");
                 continue;
             }
 
+            //had to create these structs, werent already there so could be wrong?
             timeval tv;
             fd_set rfd;
             // wait to check if there is data available to receive; need to retry if timeout: no need to change
@@ -177,13 +178,16 @@ void traceroute(char* dest) {
                  */
                
                 // ----------------
+                //5a
                 if(bytes_received >= 2 * (sizeof(ipheader) + sizeof(icmpheader)) ){
                     icmpheader* router_icmp = (icmpheader*)(recv_buf + sizeof(ipheader));
+                    //needs to use sizeof(icmpheader) as well to get correct offset!!
                     icmpheader* orig_icmp = (icmpheader*)( (recv_buf + sizeof(ipheader)) + sizeof(icmpheader) + sizeof(ipheader));
+                    
                     if(router_icmp->icmp_type == ICMP_TIME_EXCEEDED 
                     && orig_icmp->icmp_seq == ttl 
                     && orig_icmp->icmp_id == getpid()){
-                        //5a
+                        
                         printf("%s ", inet_ntoa(recv_addr.sin_addr));
                         printf("\n");
                         fflush(stdout);
@@ -191,18 +195,19 @@ void traceroute(char* dest) {
                         break;
                     }
                 }
+                //5b
                 else if (bytes_received == sizeof(ipheader) + sizeof(icmpheader)){
                     icmpheader* received_icmp = (icmpheader*)(recv_buf + sizeof(ipheader));
 
                     if (received_icmp->icmp_type == ICMP_ECHO_REPLY 
                     && received_icmp->icmp_id == getpid()){
-                        //5b
+
                         printf("%s ", inet_ntoa(recv_addr.sin_addr));
                         printf("\n");
                         exit(0);
                     }
                 } 
-                else {
+                else {//5c, this stops it from infinitely looping
                     printf(" * ");
                     fflush(stdout);
                     retry++;
@@ -222,6 +227,7 @@ void traceroute(char* dest) {
             /** TODO: 6
              * Check if timed out for MAX_RETRY times; increment ttl to move on to processing next hop
              */
+            //done in 5b
         }
     }
     close(sockfd);
